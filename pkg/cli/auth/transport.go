@@ -126,6 +126,12 @@ func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.base.RoundTrip(retryReq)
 }
 
+// newBaseTransport returns a private HTTP transport so each API client gets its
+// own connection pool, independent of the process-wide http.DefaultTransport.
+func newBaseTransport() *http.Transport {
+	return http.DefaultTransport.(*http.Transport).Clone() //nolint:forcetypeassert
+}
+
 // NewAPIClient returns a ClientWithResponses wired with automatic token refresh.
 // Proactive rotation (30s before expiry) and 401 retry are transparent to callers.
 func NewAPIClient(cfg Config, l *zap.SugaredLogger, cfgPath, contextName string) (*client.ClientWithResponses, error) {
@@ -144,7 +150,7 @@ func NewAPIClient(cfg Config, l *zap.SugaredLogger, cfgPath, contextName string)
 	c, err := client.NewClientWithResponses(
 		cli.NormalizeServerURL(sess.Server.URL),
 		client.WithHTTPClient(&http.Client{
-			Transport: &authTransport{source: ts, base: http.DefaultTransport},
+			Transport: &authTransport{source: ts, base: newBaseTransport()},
 		}),
 	)
 	if err != nil {

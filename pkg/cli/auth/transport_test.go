@@ -74,7 +74,7 @@ func TestTransport_InjectsBearerToken(t *testing.T) {
 	require.NoError(t, newTransportConfig(srv.URL).Save(cfgPath))
 
 	ts := loadTokenSource(t, cfgPath, NewLogin(Config{}, zap.NewNop().Sugar()))
-	tr := &authTransport{source: ts, base: http.DefaultTransport}
+	tr := &authTransport{source: ts, base: newBaseTransport()}
 
 	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	resp, err := tr.RoundTrip(req)
@@ -111,7 +111,7 @@ func TestTransport_ProactiveRefresh(t *testing.T) {
 	require.NoError(t, cfg.Save(cfgPath))
 
 	ts := loadTokenSource(t, cfgPath, NewLogin(Config{}, zap.NewNop().Sugar()))
-	tr := &authTransport{source: ts, base: http.DefaultTransport}
+	tr := &authTransport{source: ts, base: newBaseTransport()}
 
 	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	resp, err := tr.RoundTrip(req)
@@ -150,7 +150,7 @@ func TestTransport_On401_RefreshAndRetry(t *testing.T) {
 	require.NoError(t, newTransportConfig(srv.URL).Save(cfgPath))
 
 	ts := loadTokenSource(t, cfgPath, NewLogin(Config{}, zap.NewNop().Sugar()))
-	tr := &authTransport{source: ts, base: http.DefaultTransport}
+	tr := &authTransport{source: ts, base: newBaseTransport()}
 
 	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	resp, err := tr.RoundTrip(req)
@@ -176,7 +176,7 @@ func TestTransport_On401_RefreshFails_ReturnsErrTokenRefresh(t *testing.T) {
 	require.NoError(t, newTransportConfig(srv.URL).Save(cfgPath))
 
 	ts := loadTokenSource(t, cfgPath, NewLogin(Config{}, zap.NewNop().Sugar()))
-	tr := &authTransport{source: ts, base: http.DefaultTransport}
+	tr := &authTransport{source: ts, base: newBaseTransport()}
 
 	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	resp, err := tr.RoundTrip(req)
@@ -218,7 +218,7 @@ func TestTransport_On401_RetryReplaysBody(t *testing.T) {
 	require.NoError(t, newTransportConfig(srv.URL).Save(cfgPath))
 
 	ts := loadTokenSource(t, cfgPath, NewLogin(Config{}, zap.NewNop().Sugar()))
-	tr := &authTransport{source: ts, base: http.DefaultTransport}
+	tr := &authTransport{source: ts, base: newBaseTransport()}
 
 	payload := `{"metadata":{"name":"my-mongo"}}`
 	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/instances", bytes.NewReader([]byte(payload)))
