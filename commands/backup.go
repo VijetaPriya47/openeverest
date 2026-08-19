@@ -23,9 +23,12 @@ import (
 
 var backupCmd = &cobra.Command{
 	Use:   "backup <command> [flags]",
+	Args:  cobra.NoArgs,
 	Short: "Manage Everest backups",
 	Long:  "Manage Everest backups",
-	RunE:  func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return cmd.Help()
+	},
 }
 
 func init() {

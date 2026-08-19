@@ -23,10 +23,12 @@ import (
 
 var extensionCmd = &cobra.Command{
 	Use:   "extension <command> [flags]",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.NoArgs,
 	Long:  "Manage Everest extensions (generic plugins and providers)",
 	Short: "Manage Everest extensions",
-	Run:   func(_ *cobra.Command, _ []string) {},
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return cmd.Help()
+	},
 }
 
 func init() {

@@ -24,10 +24,12 @@ import (
 
 var settingsCmd = &cobra.Command{
 	Use:   "settings <command> [flags]",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.NoArgs,
 	Long:  "Configure Everest settings",
 	Short: "Configure Everest settings",
-	Run:   func(_ *cobra.Command, _ []string) {},
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return cmd.Help()
+	},
 }
 
 func init() {

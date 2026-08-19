@@ -24,9 +24,12 @@ import (
 
 var instanceCmd = &cobra.Command{
 	Use:   "instance <command> [flags]",
+	Args:  cobra.NoArgs,
 	Short: "Manage Everest instances",
 	Long:  "Manage Everest instances",
-	RunE:  func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return cmd.Help()
+	},
 }
 
 func init() {

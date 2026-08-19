@@ -25,9 +25,12 @@ import (
 var providerCmd = &cobra.Command{
 	Use:     "provider <command> [flags]",
 	Aliases: []string{"prov"},
+	Args:    cobra.NoArgs,
 	Short:   "Manage Everest providers",
 	Long:    "Manage Everest providers",
-	RunE:    func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return cmd.Help()
+	},
 }
 
 func init() {

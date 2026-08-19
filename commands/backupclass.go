@@ -25,9 +25,12 @@ import (
 var backupClassCmd = &cobra.Command{
 	Use:     "backup-class <command> [flags]",
 	Aliases: []string{"backupclass", "bc"},
+	Args:    cobra.NoArgs,
 	Short:   "Manage Everest backup classes",
 	Long:    "Manage Everest backup classes",
-	RunE:    func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return cmd.Help()
+	},
 }
 
 func init() {

@@ -24,10 +24,12 @@ import (
 
 var accountsCmd = &cobra.Command{
 	Use:   "accounts <command> [flags]",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.NoArgs,
 	Long:  "Manage Everest accounts",
 	Short: "Manage Everest accounts",
-	Run:   func(_ *cobra.Command, _ []string) {},
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return cmd.Help()
+	},
 }
 
 func init() {

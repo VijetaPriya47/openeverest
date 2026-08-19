@@ -24,9 +24,12 @@ import (
 var backupStorageCmd = &cobra.Command{
 	Use:     "backup-storage <command> [flags]",
 	Aliases: []string{"backupstorage", "bs"},
+	Args:    cobra.NoArgs,
 	Short:   "Manage Everest backup storages",
 	Long:    "Manage Everest backup storages",
-	RunE:    func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return cmd.Help()
+	},
 }
 
 func init() {

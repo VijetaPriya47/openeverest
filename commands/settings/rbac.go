@@ -24,9 +24,12 @@ import (
 
 var settingsRBACCmd = &cobra.Command{
 	Use:   "rbac <command> [flags]",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.NoArgs,
 	Long:  "Manage RBAC settings",
 	Short: "Manage RBAC settings",
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return cmd.Help()
+	},
 }
 
 func init() {

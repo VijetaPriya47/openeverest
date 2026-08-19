@@ -24,9 +24,12 @@ import (
 
 var authCmd = &cobra.Command{
 	Use:   "auth <command> [flags]",
+	Args:  cobra.NoArgs,
 	Short: "Manage Everest authentication",
 	Long:  "Manage Everest authentication",
-	RunE:  func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return cmd.Help()
+	},
 }
 
 func init() {
