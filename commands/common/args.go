@@ -19,23 +19,28 @@ package common
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
 
+// NoSubcommandArgs rejects positional arguments on commands that exist only to
+// group subcommands, mirroring the "unknown command" error Cobra produces at the root,
+// suggestions included.
 func NoSubcommandArgs(cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
 		return nil
 	}
-	msg := fmt.Sprintf("unknown command %q for %q", args[0], cmd.CommandPath())
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "unknown command %q for %q", args[0], cmd.CommandPath())
 	if cmd.SuggestionsMinimumDistance <= 0 {
 		cmd.SuggestionsMinimumDistance = 2
 	}
 	if suggestions := cmd.SuggestionsFor(args[0]); len(suggestions) > 0 {
-		msg += "\n\nDid you mean this?\n"
+		sb.WriteString("\n\nDid you mean this?\n")
 		for _, s := range suggestions {
-			msg += fmt.Sprintf("\t%s %s\n", cmd.CommandPath(), s)
+			fmt.Fprintf(&sb, "\t%s %s\n", cmd.CommandPath(), s)
 		}
 	}
-	return errors.New(msg)
+	return errors.New(sb.String())
 }
