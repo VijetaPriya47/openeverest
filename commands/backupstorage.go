@@ -19,12 +19,13 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/openeverest/openeverest/v2/commands/backupstorage"
+	"github.com/openeverest/openeverest/v2/commands/common"
 )
 
 var backupStorageCmd = &cobra.Command{
 	Use:     "backup-storage <command> [flags]",
 	Aliases: []string{"backupstorage", "bs"},
-	Args:    cobra.NoArgs,
+	Args:    common.NoSubcommandArgs,
 	Short:   "Manage Everest backup storages",
 	Long:    "Manage Everest backup storages",
 	RunE: func(cmd *cobra.Command, _ []string) error {

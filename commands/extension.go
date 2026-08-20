@@ -18,12 +18,13 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
+	"github.com/openeverest/openeverest/v2/commands/common"
 	"github.com/openeverest/openeverest/v2/commands/extension"
 )
 
 var extensionCmd = &cobra.Command{
 	Use:   "extension <command> [flags]",
-	Args:  cobra.NoArgs,
+	Args:  common.NoSubcommandArgs,
 	Long:  "Manage Everest extensions (generic plugins and providers)",
 	Short: "Manage Everest extensions",
 	RunE: func(cmd *cobra.Command, _ []string) error {
