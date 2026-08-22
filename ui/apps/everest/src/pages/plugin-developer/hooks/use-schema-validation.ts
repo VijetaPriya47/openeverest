@@ -12,8 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-export * from './useActiveBreakpoint';
-export * from './useDeleteModal';
-export * from './useDevMode';
-export * from './useLocalStorage';
-export * from './useUpdateEntityWithConflictRetry';
+import { useMemo } from 'react';
+import { TopologyUISchemas } from 'components/ui-generator/ui-generator.types';
+import { validateSchema } from '../utils/validate-schema';
+import { Diagnostic } from '../editor/types';
+
+type SchemaValidation = {
+  diagnostics: Diagnostic[];
+  parsed: TopologyUISchemas | null;
+};
+
+// Derived, not state, so every path that changes the text stays in sync.
+export const useSchemaValidation = (yamlText: string): SchemaValidation =>
+  useMemo(() => validateSchema(yamlText), [yamlText]);
