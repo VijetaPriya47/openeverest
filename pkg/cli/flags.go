@@ -126,6 +126,8 @@ const (
 	FlagInstanceDeletionPolicy = "deletion-policy"
 	// FlagInstanceIgnoreNotFound treats an already-deleted instance as success.
 	FlagInstanceIgnoreNotFound = "ignore-not-found"
+	// FlagInstanceDryRun previews an update without writing it.
+	FlagInstanceDryRun = "dry-run"
 
 	// shared flags.
 

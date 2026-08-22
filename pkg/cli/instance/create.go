@@ -549,6 +549,9 @@ func parseSetFlags(setFlags []string) (map[string]any, error) {
 }
 
 func coerceValue(s string) any {
+	if s == "null" {
+		return nil
+	}
 	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
 		return i
 	}
