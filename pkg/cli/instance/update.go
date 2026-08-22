@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"go.uber.org/zap"
@@ -45,15 +46,15 @@ type UpdateOptions struct {
 	DryRun     bool     // preview the merged spec without writing it
 }
 
-// InstanceUpdater implements `instance update` business logic.
-type InstanceUpdater struct {
+// Updater implements `instance update` business logic.
+type Updater struct {
 	config Config
 	l      *zap.SugaredLogger
 }
 
-// NewInstanceUpdater returns a new InstanceUpdater.
-func NewInstanceUpdater(cfg Config, l *zap.SugaredLogger) *InstanceUpdater {
-	iu := &InstanceUpdater{config: cfg, l: l.With("component", "instance-updater")}
+// NewUpdater returns a new Updater.
+func NewUpdater(cfg Config, l *zap.SugaredLogger) *Updater {
+	iu := &Updater{config: cfg, l: l.With("component", "instance-updater")}
 	if cfg.Pretty {
 		iu.l = zap.NewNop().Sugar()
 	}
@@ -61,7 +62,7 @@ func NewInstanceUpdater(cfg Config, l *zap.SugaredLogger) *InstanceUpdater {
 }
 
 // Run patches the instance spec with -f/--set and PUTs it back, retrying once on a 409 conflict. Fields not named by -f/--set keep their current value.
-func (iu *InstanceUpdater) Run(ctx context.Context, opts UpdateOptions, cfgPath string) error {
+func (iu *Updater) Run(ctx context.Context, opts UpdateOptions, cfgPath string) error {
 	if opts.ValuesFile == "" && len(opts.Set) == 0 {
 		return fmt.Errorf("at least one of --set or -f/--file is required")
 	}
@@ -76,7 +77,7 @@ func (iu *InstanceUpdater) Run(ctx context.Context, opts UpdateOptions, cfgPath 
 		return err
 	}
 
-	inst, err := iu.fetchInstance(ctx, c, opts)
+	inst, err := getInstance(ctx, c, opts.Cluster, opts.Namespace, opts.Name)
 	if err != nil {
 		return err
 	}
@@ -85,16 +86,16 @@ func (iu *InstanceUpdater) Run(ctx context.Context, opts UpdateOptions, cfgPath 
 		return err
 	}
 
-	merged, outgoing, err := prepareSpec(inst, overrides)
+	prepared, err := prepareSpec(inst, overrides)
 	if err != nil {
 		return err
 	}
 
 	if opts.DryRun {
-		return iu.emitDryRun(inst, outgoing, opts)
+		return iu.emitDryRun(prepared, opts)
 	}
 
-	updated, err := iu.update(ctx, c, opts, inst, merged, overrides)
+	updated, err := iu.update(ctx, c, opts, prepared, overrides)
 	if err != nil {
 		return err
 	}
@@ -102,7 +103,7 @@ func (iu *InstanceUpdater) Run(ctx context.Context, opts UpdateOptions, cfgPath 
 }
 
 // validateSetComponents rejects --set paths naming an unknown component, the one typo the decoder's unknown-field check cannot catch.
-func (iu *InstanceUpdater) validateSetComponents(ctx context.Context, c *client.ClientWithResponses, opts UpdateOptions, inst *client.Instance) error {
+func (iu *Updater) validateSetComponents(ctx context.Context, c *client.ClientWithResponses, opts UpdateOptions, inst *client.Instance) error {
 	if len(opts.Set) == 0 {
 		return nil
 	}
@@ -115,7 +116,7 @@ func (iu *InstanceUpdater) validateSetComponents(ctx context.Context, c *client.
 	if err != nil || resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
 		// Fail open: the server validates component names too.
 		iu.l.Warnf("could not fetch provider %q to validate component names, leaving it to the server", provider)
-		return nil
+		return nil //nolint:nilerr // a lookup failure must not block a valid update
 	}
 
 	var topology string
@@ -125,46 +126,67 @@ func (iu *InstanceUpdater) validateSetComponents(ctx context.Context, c *client.
 	return validateComponents(opts.Set, resp.JSON200, topology)
 }
 
-func (iu *InstanceUpdater) fetchInstance(ctx context.Context, c *client.ClientWithResponses, opts UpdateOptions) (*client.Instance, error) {
-	resp, err := c.GetInstanceWithResponse(ctx, opts.Cluster, opts.Namespace, opts.Name)
+// getInstance is shared with instance status.
+func getInstance(ctx context.Context, c *client.ClientWithResponses, cluster, namespace, name string) (*client.Instance, error) {
+	resp, err := c.GetInstanceWithResponse(ctx, cluster, namespace, name)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch instance %q: %w", opts.Name, err)
+		return nil, fmt.Errorf("failed to fetch instance %q: %w", name, err)
 	}
 	if resp.StatusCode() == http.StatusNotFound {
-		return nil, fmt.Errorf("instance %q not found in namespace %q", opts.Name, opts.Namespace)
+		return nil, fmt.Errorf("instance %q not found in namespace %q", name, namespace)
 	}
 	if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
-		return nil, fmt.Errorf("unexpected response fetching instance %q: %s", opts.Name, resp.Status())
+		return nil, fmt.Errorf("unexpected response fetching instance %q: %s", name, resp.Status())
 	}
 	return resp.JSON200, nil
 }
 
-// prepareSpec returns the map to PUT and the spec the server would store. The write and --dry-run both go through it, so they cannot accept different input.
-func prepareSpec(inst *client.Instance, overrides map[string]any) (map[string]any, map[string]any, error) {
-	merged, nulls, err := mergeSpec(inst, overrides)
-	if err != nil {
-		return nil, nil, err
-	}
-	outgoing, err := outgoingSpec(merged)
-	if err != nil {
-		return nil, nil, err
-	}
-	if err := checkUnset(outgoing, nulls); err != nil {
-		return nil, nil, err
-	}
-	return merged, outgoing, nil
+type preparedSpec struct {
+	instance *client.Instance // spec merged, ready to PUT
+	current  map[string]any   // spec before the merge
+	outgoing map[string]any   // spec the server will store
 }
 
-func mergeSpec(inst *client.Instance, overrides map[string]any) (map[string]any, []string, error) {
+// prepareSpec is the single path for the write and --dry-run, so the two cannot accept different input.
+func prepareSpec(inst *client.Instance, overrides map[string]any) (*preparedSpec, error) {
 	current, err := specToMap(inst.Spec)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	deepMerge(current, overrides)
-	return current, stripNulls(current, ""), nil
+
+	merged := deepCopyMap(current)
+	deepMerge(merged, overrides)
+	nulls := stripNulls(merged, "")
+
+	prepared := *inst
+	if err := applyMergedSpec(&prepared, merged); err != nil {
+		return nil, err
+	}
+	outgoing, err := specToMap(prepared.Spec)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkUnset(outgoing, nulls); err != nil {
+		return nil, err
+	}
+	return &preparedSpec{instance: &prepared, current: current, outgoing: outgoing}, nil
+}
+
+// deepCopyMap copies only the map structure; list values, and any maps inside them, stay shared with the source.
+func deepCopyMap(m map[string]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		if child, ok := v.(map[string]any); ok {
+			out[k] = deepCopyMap(child)
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }
 
 // stripNulls deletes nil-valued keys instead of leaving them as JSON nulls, which would unset nothing, and returns their paths for checkUnset.
+// It recurses into list elements too, so a null under storages[0] is caught the same way.
 func stripNulls(m map[string]any, prefix string) []string {
 	var paths []string
 	for k, v := range m {
@@ -178,6 +200,12 @@ func stripNulls(m map[string]any, prefix string) []string {
 			paths = append(paths, path)
 		case map[string]any:
 			paths = append(paths, stripNulls(tv, path)...)
+		case []any:
+			for i, elem := range tv {
+				if child, ok := elem.(map[string]any); ok {
+					paths = append(paths, stripNulls(child, fmt.Sprintf("%s[%d]", path, i))...)
+				}
+			}
 		}
 	}
 	sort.Strings(paths)
@@ -201,16 +229,37 @@ func checkUnset(outgoing map[string]any, nulls []string) error {
 
 func lookupPath(m map[string]any, path string) (any, bool) {
 	var cur any = m
-	for _, seg := range strings.Split(path, ".") {
+	for seg := range strings.SplitSeq(path, ".") {
+		key, idx, indexed := parseIndexedSegment(seg)
 		cm, ok := cur.(map[string]any)
 		if !ok {
 			return nil, false
 		}
-		if cur, ok = cm[seg]; !ok {
+		if cur, ok = cm[key]; !ok {
 			return nil, false
+		}
+		if indexed {
+			list, ok := cur.([]any)
+			if !ok || idx >= len(list) {
+				return nil, false
+			}
+			cur = list[idx]
 		}
 	}
 	return cur, true
+}
+
+// parseIndexedSegment reads the "storages[0]" form stripNulls records.
+func parseIndexedSegment(seg string) (string, int, bool) {
+	open := strings.IndexByte(seg, '[')
+	if open < 0 || !strings.HasSuffix(seg, "]") {
+		return seg, 0, false
+	}
+	idx, err := strconv.Atoi(seg[open+1 : len(seg)-1])
+	if err != nil || idx < 0 {
+		return seg, 0, false
+	}
+	return seg[:open], idx, true
 }
 
 func specToMap(spec any) (map[string]any, error) {
@@ -251,18 +300,9 @@ func specDecodeError(err error) error {
 	return fmt.Errorf("failed to parse merged spec: %w", err)
 }
 
-// outgoingSpec renders merged as the PUT will carry it.
-func outgoingSpec(merged map[string]any) (map[string]any, error) {
-	var preview client.Instance
-	if err := applyMergedSpec(&preview, merged); err != nil {
-		return nil, err
-	}
-	return specToMap(preview.Spec)
-}
-
-func (iu *InstanceUpdater) update(ctx context.Context, c *client.ClientWithResponses, opts UpdateOptions, inst *client.Instance, merged map[string]any, overrides map[string]any) (*client.Instance, error) {
+func (iu *Updater) update(ctx context.Context, c *client.ClientWithResponses, opts UpdateOptions, prepared *preparedSpec, overrides map[string]any) (*client.Instance, error) {
 	for attempt := 0; ; attempt++ {
-		updated, conflict, err := iu.tryUpdate(ctx, c, opts, inst, merged)
+		updated, conflict, err := iu.tryUpdate(ctx, c, opts, prepared.instance)
 		if err != nil || !conflict {
 			return updated, err
 		}
@@ -271,20 +311,17 @@ func (iu *InstanceUpdater) update(ctx context.Context, c *client.ClientWithRespo
 		}
 
 		iu.l.Warnf("instance %q was concurrently modified, retrying once", opts.Name)
-		if inst, err = iu.fetchInstance(ctx, c, opts); err != nil {
+		fresh, err := getInstance(ctx, c, opts.Cluster, opts.Namespace, opts.Name)
+		if err != nil {
 			return nil, err
 		}
-		if merged, _, err = prepareSpec(inst, overrides); err != nil {
+		if prepared, err = prepareSpec(fresh, overrides); err != nil {
 			return nil, err
 		}
 	}
 }
 
-func (iu *InstanceUpdater) tryUpdate(ctx context.Context, c *client.ClientWithResponses, opts UpdateOptions, inst *client.Instance, merged map[string]any) (*client.Instance, bool, error) {
-	if err := applyMergedSpec(inst, merged); err != nil {
-		return nil, false, err
-	}
-
+func (iu *Updater) tryUpdate(ctx context.Context, c *client.ClientWithResponses, opts UpdateOptions, inst *client.Instance) (*client.Instance, bool, error) {
 	resp, err := c.UpdateInstanceWithResponse(ctx, opts.Cluster, opts.Namespace, opts.Name, *inst)
 	if err != nil {
 		return nil, false, fmt.Errorf("update instance request failed: %w", err)
@@ -306,28 +343,20 @@ func (iu *InstanceUpdater) tryUpdate(ctx context.Context, c *client.ClientWithRe
 }
 
 // emitDryRun prints the current and would-be spec without writing. JSON mode emits a whole instance so the same jq works with or without --dry-run.
-func (iu *InstanceUpdater) emitDryRun(inst *client.Instance, outgoing map[string]any, opts UpdateOptions) error {
+func (iu *Updater) emitDryRun(prepared *preparedSpec, opts UpdateOptions) error {
 	if !iu.config.Pretty {
-		preview := *inst
-		if err := applyMergedSpec(&preview, outgoing); err != nil {
-			return err
-		}
-		return writeInstanceJSON(&preview)
+		return writeInstanceJSON(prepared.instance)
 	}
 
-	current, err := specToMap(inst.Spec)
-	if err != nil {
-		return err
-	}
-	currentYAML, _ := yaml.Marshal(current)
-	mergedYAML, _ := yaml.Marshal(outgoing)
+	currentYAML, _ := yaml.Marshal(prepared.current)
+	mergedYAML, _ := yaml.Marshal(prepared.outgoing)
 
 	_, _ = fmt.Fprint(os.Stdout, output.Info("Dry run for instance %q, no changes written", opts.Name))
 	_, _ = fmt.Fprintf(os.Stdout, "\n--- current spec ---\n%s\n--- would become ---\n%s", currentYAML, mergedYAML)
 	return nil
 }
 
-func (iu *InstanceUpdater) emitUpdated(updated *client.Instance, opts UpdateOptions) error {
+func (iu *Updater) emitUpdated(updated *client.Instance, opts UpdateOptions) error {
 	if iu.config.Pretty {
 		_, _ = fmt.Fprint(os.Stdout, output.Success("Instance %q updated in namespace %q", opts.Name, opts.Namespace))
 		return nil

@@ -91,10 +91,26 @@ func instanceJSON(t *testing.T, resourceVersion string, spec map[string]any) []b
 	return b
 }
 
-func writeJSONBody(w http.ResponseWriter, status int, body []byte) {
+func writeJSONBody(w http.ResponseWriter, body []byte) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
+	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
+}
+
+// asMap and asSlice use assert, not require: require's FailNow is invalid off
+// the test goroutine, and these run inside http handlers.
+func asMap(t *testing.T, v any) map[string]any {
+	t.Helper()
+	m, ok := v.(map[string]any)
+	assert.True(t, ok, "expected a map, got %T", v)
+	return m
+}
+
+func asSlice(t *testing.T, v any) []any {
+	t.Helper()
+	s, ok := v.([]any)
+	assert.True(t, ok, "expected a slice, got %T", v)
+	return s
 }
 
 func decodeSpec(t *testing.T, r *http.Request) map[string]any {
@@ -111,7 +127,7 @@ func decodeSpec(t *testing.T, r *http.Request) map[string]any {
 func TestUpdate_NoOp_Rejected(t *testing.T) {
 	t.Parallel()
 
-	iu := NewInstanceUpdater(Config{}, zap.NewNop().Sugar())
+	iu := NewUpdater(Config{}, zap.NewNop().Sugar())
 	err := iu.Run(context.Background(), baseUpdateOpts(), filepath.Join(t.TempDir(), "config.yaml"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--set")
@@ -131,17 +147,17 @@ func TestUpdate_HappyPath_PatchNotReplace(t *testing.T) {
 
 	srv := newUpdateServer(t,
 		func(w http.ResponseWriter, _ *http.Request) {
-			writeJSONBody(w, http.StatusOK, instanceJSON(t, "1", currentSpec))
+			writeJSONBody(w, instanceJSON(t, "1", currentSpec))
 		},
 		func(w http.ResponseWriter, r *http.Request) {
 			spec := decodeSpec(t, r)
-			components := spec["components"].(map[string]any)
-			engine := components["engine"].(map[string]any)
-			proxy := components["proxy"].(map[string]any)
+			components := asMap(t, spec["components"])
+			engine := asMap(t, components["engine"])
+			proxy := asMap(t, components["proxy"])
 			assert.InDelta(t, 5, engine["replicas"], 0, "changed field should be updated")
 			assert.InDelta(t, 1, proxy["replicas"], 0, "untouched field should keep its current value")
 			assert.Equal(t, "8.0", spec["version"], "untouched field should keep its current value")
-			writeJSONBody(w, http.StatusOK, instanceJSON(t, "2", spec))
+			writeJSONBody(w, instanceJSON(t, "2", spec))
 		},
 	)
 	defer srv.Close()
@@ -152,9 +168,9 @@ func TestUpdate_HappyPath_PatchNotReplace(t *testing.T) {
 	opts := baseUpdateOpts()
 	opts.Set = []string{"components.engine.replicas=5"}
 
-	iu := NewInstanceUpdater(Config{}, zap.NewNop().Sugar())
+	iu := NewUpdater(Config{}, zap.NewNop().Sugar())
 	err := iu.Run(context.Background(), opts, cfgPath)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 }
 
 func TestUpdate_SetNull_UnsetsField(t *testing.T) {
@@ -167,13 +183,13 @@ func TestUpdate_SetNull_UnsetsField(t *testing.T) {
 
 	srv := newUpdateServer(t,
 		func(w http.ResponseWriter, _ *http.Request) {
-			writeJSONBody(w, http.StatusOK, instanceJSON(t, "1", currentSpec))
+			writeJSONBody(w, instanceJSON(t, "1", currentSpec))
 		},
 		func(w http.ResponseWriter, r *http.Request) {
 			spec := decodeSpec(t, r)
 			_, present := spec["version"]
 			assert.False(t, present, "null-set field should be absent from the outgoing spec")
-			writeJSONBody(w, http.StatusOK, instanceJSON(t, "2", spec))
+			writeJSONBody(w, instanceJSON(t, "2", spec))
 		},
 	)
 	defer srv.Close()
@@ -184,9 +200,9 @@ func TestUpdate_SetNull_UnsetsField(t *testing.T) {
 	opts := baseUpdateOpts()
 	opts.Set = []string{"version=null"}
 
-	iu := NewInstanceUpdater(Config{}, zap.NewNop().Sugar())
+	iu := NewUpdater(Config{}, zap.NewNop().Sugar())
 	err := iu.Run(context.Background(), opts, cfgPath)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 }
 
 func TestUpdate_ValuesFile_Merge(t *testing.T) {
@@ -197,113 +213,80 @@ func TestUpdate_ValuesFile_Merge(t *testing.T) {
 		"components":  map[string]any{"engine": map[string]any{"replicas": 3}},
 	}
 
-	srv := newUpdateServer(t,
-		func(w http.ResponseWriter, _ *http.Request) {
-			writeJSONBody(w, http.StatusOK, instanceJSON(t, "1", currentSpec))
-		},
-		func(w http.ResponseWriter, r *http.Request) {
-			spec := decodeSpec(t, r)
-			engine := spec["components"].(map[string]any)["engine"].(map[string]any)
-			assert.InDelta(t, 7, engine["replicas"], 0)
-			writeJSONBody(w, http.StatusOK, instanceJSON(t, "2", spec))
-		},
-	)
-	defer srv.Close()
+	for _, tc := range []struct {
+		name         string
+		extraSet     []string
+		wantReplicas float64
+	}{
+		{"file only", nil, 7},
+		{"set overrides file", []string{"components.engine.replicas=9"}, 9},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
-	require.NoError(t, newTestConfig(srv.URL).Save(cfgPath))
+			srv := newUpdateServer(t,
+				func(w http.ResponseWriter, _ *http.Request) {
+					writeJSONBody(w, instanceJSON(t, "1", currentSpec))
+				},
+				func(w http.ResponseWriter, r *http.Request) {
+					spec := decodeSpec(t, r)
+					engine := asMap(t, asMap(t, spec["components"])["engine"])
+					assert.InDelta(t, tc.wantReplicas, engine["replicas"], 0, "--set should win over -f")
+					writeJSONBody(w, instanceJSON(t, "2", spec))
+				},
+			)
+			defer srv.Close()
 
-	valuesPath := filepath.Join(t.TempDir(), "values.yaml")
-	require.NoError(t, os.WriteFile(valuesPath, []byte("components:\n  engine:\n    replicas: 7\n"), 0o600))
+			cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+			require.NoError(t, newTestConfig(srv.URL).Save(cfgPath))
 
-	opts := baseUpdateOpts()
-	opts.ValuesFile = valuesPath
+			valuesPath := filepath.Join(t.TempDir(), "values.yaml")
+			require.NoError(t, os.WriteFile(valuesPath, []byte("components:\n  engine:\n    replicas: 7\n"), 0o600))
 
-	iu := NewInstanceUpdater(Config{}, zap.NewNop().Sugar())
-	err := iu.Run(context.Background(), opts, cfgPath)
-	assert.NoError(t, err)
-}
+			opts := baseUpdateOpts()
+			opts.ValuesFile = valuesPath
+			opts.Set = tc.extraSet
 
-func TestUpdate_SetOverridesValuesFile(t *testing.T) {
-	t.Parallel()
-
-	currentSpec := map[string]any{
-		"providerRef": map[string]any{"name": "psmdb"},
-		"components":  map[string]any{"engine": map[string]any{"replicas": 3}},
+			iu := NewUpdater(Config{}, zap.NewNop().Sugar())
+			err := iu.Run(context.Background(), opts, cfgPath)
+			require.NoError(t, err)
+		})
 	}
-
-	srv := newUpdateServer(t,
-		func(w http.ResponseWriter, _ *http.Request) {
-			writeJSONBody(w, http.StatusOK, instanceJSON(t, "1", currentSpec))
-		},
-		func(w http.ResponseWriter, r *http.Request) {
-			spec := decodeSpec(t, r)
-			engine := spec["components"].(map[string]any)["engine"].(map[string]any)
-			assert.InDelta(t, 9, engine["replicas"], 0, "--set should win over -f")
-			writeJSONBody(w, http.StatusOK, instanceJSON(t, "2", spec))
-		},
-	)
-	defer srv.Close()
-
-	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
-	require.NoError(t, newTestConfig(srv.URL).Save(cfgPath))
-
-	valuesPath := filepath.Join(t.TempDir(), "values.yaml")
-	require.NoError(t, os.WriteFile(valuesPath, []byte("components:\n  engine:\n    replicas: 7\n"), 0o600))
-
-	opts := baseUpdateOpts()
-	opts.ValuesFile = valuesPath
-	opts.Set = []string{"components.engine.replicas=9"}
-
-	iu := NewInstanceUpdater(Config{}, zap.NewNop().Sugar())
-	err := iu.Run(context.Background(), opts, cfgPath)
-	assert.NoError(t, err)
 }
 
-func TestUpdate_GetNotFound(t *testing.T) {
-	t.Parallel()
-
-	srv := newUpdateServer(t,
-		func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) },
-		nil,
-	)
-	defer srv.Close()
-
-	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
-	require.NoError(t, newTestConfig(srv.URL).Save(cfgPath))
-
-	opts := baseUpdateOpts()
-	opts.Set = []string{"components.engine.replicas=5"}
-
-	iu := NewInstanceUpdater(Config{}, zap.NewNop().Sugar())
-	err := iu.Run(context.Background(), opts, cfgPath)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not found")
-}
-
-func TestUpdate_PutNotFound(t *testing.T) {
+func TestUpdate_NotFound(t *testing.T) {
 	t.Parallel()
 
 	currentSpec := map[string]any{"providerRef": map[string]any{"name": "psmdb"}}
+	notFound := func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) }
+	getOK := func(w http.ResponseWriter, _ *http.Request) { writeJSONBody(w, instanceJSON(t, "1", currentSpec)) }
 
-	srv := newUpdateServer(t,
-		func(w http.ResponseWriter, _ *http.Request) {
-			writeJSONBody(w, http.StatusOK, instanceJSON(t, "1", currentSpec))
-		},
-		func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) },
-	)
-	defer srv.Close()
+	for _, tc := range []struct {
+		name       string
+		getHandler http.HandlerFunc
+		putHandler http.HandlerFunc
+	}{
+		{"get", notFound, nil},
+		{"put", getOK, notFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
-	require.NoError(t, newTestConfig(srv.URL).Save(cfgPath))
+			srv := newUpdateServer(t, tc.getHandler, tc.putHandler)
+			defer srv.Close()
 
-	opts := baseUpdateOpts()
-	opts.Set = []string{"components.engine.replicas=5"}
+			cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+			require.NoError(t, newTestConfig(srv.URL).Save(cfgPath))
 
-	iu := NewInstanceUpdater(Config{}, zap.NewNop().Sugar())
-	err := iu.Run(context.Background(), opts, cfgPath)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not found")
+			opts := baseUpdateOpts()
+			opts.Set = []string{"components.engine.replicas=5"}
+
+			iu := NewUpdater(Config{}, zap.NewNop().Sugar())
+			err := iu.Run(context.Background(), opts, cfgPath)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "not found")
+		})
+	}
 }
 
 func TestUpdate_ConflictThenSuccess(t *testing.T) {
@@ -318,7 +301,7 @@ func TestUpdate_ConflictThenSuccess(t *testing.T) {
 	srv := newUpdateServer(t,
 		func(w http.ResponseWriter, _ *http.Request) {
 			getCalls++
-			writeJSONBody(w, http.StatusOK, instanceJSON(t, "1", currentSpec))
+			writeJSONBody(w, instanceJSON(t, "1", currentSpec))
 		},
 		func(w http.ResponseWriter, r *http.Request) {
 			putCalls++
@@ -327,9 +310,9 @@ func TestUpdate_ConflictThenSuccess(t *testing.T) {
 				return
 			}
 			spec := decodeSpec(t, r)
-			engine := spec["components"].(map[string]any)["engine"].(map[string]any)
+			engine := asMap(t, asMap(t, spec["components"])["engine"])
 			assert.InDelta(t, 5, engine["replicas"], 0, "the retry should reapply the same override")
-			writeJSONBody(w, http.StatusOK, instanceJSON(t, "2", spec))
+			writeJSONBody(w, instanceJSON(t, "2", spec))
 		},
 	)
 	defer srv.Close()
@@ -340,9 +323,9 @@ func TestUpdate_ConflictThenSuccess(t *testing.T) {
 	opts := baseUpdateOpts()
 	opts.Set = []string{"components.engine.replicas=5"}
 
-	iu := NewInstanceUpdater(Config{}, zap.NewNop().Sugar())
+	iu := NewUpdater(Config{}, zap.NewNop().Sugar())
 	err := iu.Run(context.Background(), opts, cfgPath)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 2, getCalls, "should re-fetch once after the conflict")
 	assert.Equal(t, 2, putCalls, "should retry the PUT exactly once")
 }
@@ -355,7 +338,7 @@ func TestUpdate_ConflictTwice_Fails(t *testing.T) {
 	putCalls := 0
 	srv := newUpdateServer(t,
 		func(w http.ResponseWriter, _ *http.Request) {
-			writeJSONBody(w, http.StatusOK, instanceJSON(t, "1", currentSpec))
+			writeJSONBody(w, instanceJSON(t, "1", currentSpec))
 		},
 		func(w http.ResponseWriter, _ *http.Request) {
 			putCalls++
@@ -370,7 +353,7 @@ func TestUpdate_ConflictTwice_Fails(t *testing.T) {
 	opts := baseUpdateOpts()
 	opts.Set = []string{"components.engine.replicas=5"}
 
-	iu := NewInstanceUpdater(Config{}, zap.NewNop().Sugar())
+	iu := NewUpdater(Config{}, zap.NewNop().Sugar())
 	err := iu.Run(context.Background(), opts, cfgPath)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "concurrently modified twice")
@@ -390,7 +373,7 @@ func TestUpdate_DryRun_NullShowsFieldRemoved(t *testing.T) {
 
 	srv := newUpdateServer(t,
 		func(w http.ResponseWriter, _ *http.Request) {
-			writeJSONBody(w, http.StatusOK, instanceJSON(t, "1", currentSpec))
+			writeJSONBody(w, instanceJSON(t, "1", currentSpec))
 		},
 		nil, // PUT must not be called
 	)
@@ -404,7 +387,7 @@ func TestUpdate_DryRun_NullShowsFieldRemoved(t *testing.T) {
 	opts.DryRun = true
 
 	stdout := captureStdout(t, func() {
-		iu := NewInstanceUpdater(Config{}, zap.NewNop().Sugar())
+		iu := NewUpdater(Config{}, zap.NewNop().Sugar())
 		require.NoError(t, iu.Run(context.Background(), opts, cfgPath))
 	})
 
@@ -437,7 +420,7 @@ func TestUpdate_UnknownField_Rejected(t *testing.T) {
 
 			srv := newUpdateServer(t,
 				func(w http.ResponseWriter, _ *http.Request) {
-					writeJSONBody(w, http.StatusOK, instanceJSON(t, "1", currentSpec))
+					writeJSONBody(w, instanceJSON(t, "1", currentSpec))
 				},
 				nil, // a rejected path must never reach the PUT
 			)
@@ -450,7 +433,7 @@ func TestUpdate_UnknownField_Rejected(t *testing.T) {
 			opts.Set = []string{tc.set}
 			opts.DryRun = tc.dryRun
 
-			iu := NewInstanceUpdater(Config{}, zap.NewNop().Sugar())
+			iu := NewUpdater(Config{}, zap.NewNop().Sugar())
 			err := iu.Run(context.Background(), opts, cfgPath)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "unknown spec field")
@@ -479,17 +462,19 @@ func TestUpdate_ReplacedListDoesNotLeakOldFields(t *testing.T) {
 
 	srv := newUpdateServer(t,
 		func(w http.ResponseWriter, _ *http.Request) {
-			writeJSONBody(w, http.StatusOK, instanceJSON(t, "1", currentSpec))
+			writeJSONBody(w, instanceJSON(t, "1", currentSpec))
 		},
 		func(w http.ResponseWriter, r *http.Request) {
 			spec := decodeSpec(t, r)
-			storages := spec["backup"].(map[string]any)["storages"].([]any)
-			require.Len(t, storages, 1)
-			only := storages[0].(map[string]any)
-			assert.Equal(t, "s2", only["storageRef"].(map[string]any)["name"])
+			storages := asSlice(t, asMap(t, spec["backup"])["storages"])
+			if !assert.Len(t, storages, 1) {
+				return
+			}
+			only := asMap(t, storages[0])
+			assert.Equal(t, "s2", asMap(t, only["storageRef"])["name"])
 			_, leaked := only["schedules"]
 			assert.False(t, leaked, "replacement element must not inherit the old element's schedules: %v", only)
-			writeJSONBody(w, http.StatusOK, instanceJSON(t, "2", spec))
+			writeJSONBody(w, instanceJSON(t, "2", spec))
 		},
 	)
 	defer srv.Close()
@@ -504,11 +489,15 @@ func TestUpdate_ReplacedListDoesNotLeakOldFields(t *testing.T) {
 	opts := baseUpdateOpts()
 	opts.ValuesFile = valuesPath
 
-	iu := NewInstanceUpdater(Config{}, zap.NewNop().Sugar())
+	iu := NewUpdater(Config{}, zap.NewNop().Sugar())
 	require.NoError(t, iu.Run(context.Background(), opts, cfgPath))
 }
 
 // Preview and write must agree on an unset.
+//
+// Not parallel: captureStdout mutates global os.Stdout.
+//
+//nolint:paralleltest // mutates global os.Stdout; must run serially
 func TestUpdate_DryRunMatchesWrite(t *testing.T) {
 	currentSpec := map[string]any{
 		"providerRef": map[string]any{"name": "psmdb"},
@@ -519,14 +508,14 @@ func TestUpdate_DryRunMatchesWrite(t *testing.T) {
 		},
 	}
 	newGet := func(w http.ResponseWriter, _ *http.Request) {
-		writeJSONBody(w, http.StatusOK, instanceJSON(t, "1", currentSpec))
+		writeJSONBody(w, instanceJSON(t, "1", currentSpec))
 	}
 
 	// what the write sends
 	var written map[string]any
 	srv := newUpdateServer(t, newGet, func(w http.ResponseWriter, r *http.Request) {
 		written = decodeSpec(t, r)
-		writeJSONBody(w, http.StatusOK, instanceJSON(t, "2", written))
+		writeJSONBody(w, instanceJSON(t, "2", written))
 	})
 	defer srv.Close()
 
@@ -536,7 +525,7 @@ func TestUpdate_DryRunMatchesWrite(t *testing.T) {
 	opts := baseUpdateOpts()
 	opts.Set = []string{"version=null"}
 
-	iu := NewInstanceUpdater(Config{}, zap.NewNop().Sugar())
+	iu := NewUpdater(Config{}, zap.NewNop().Sugar())
 	require.NoError(t, iu.Run(context.Background(), opts, cfgPath))
 
 	// what the preview claims
@@ -583,7 +572,7 @@ func TestUpdate_NullOnRequiredFieldRejected(t *testing.T) {
 
 			srv := newUpdateServer(t,
 				func(w http.ResponseWriter, _ *http.Request) {
-					writeJSONBody(w, http.StatusOK, instanceJSON(t, "1", currentSpec))
+					writeJSONBody(w, instanceJSON(t, "1", currentSpec))
 				},
 				nil, // must never reach the PUT
 			)
@@ -596,12 +585,53 @@ func TestUpdate_NullOnRequiredFieldRejected(t *testing.T) {
 			opts.Set = []string{"backup.enabled=null"}
 			opts.DryRun = tc.dryRun
 
-			iu := NewInstanceUpdater(Config{}, zap.NewNop().Sugar())
+			iu := NewUpdater(Config{}, zap.NewNop().Sugar())
 			err := iu.Run(context.Background(), opts, cfgPath)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "cannot unset backup.enabled")
 		})
 	}
+}
+
+// A null on a required field inside a list element must be rejected too, not
+// only at the top level: stripNulls has to walk lists, not just maps.
+func TestUpdate_NullOnRequiredFieldInListRejected(t *testing.T) {
+	t.Parallel()
+
+	currentSpec := map[string]any{
+		"providerRef": map[string]any{"name": "psmdb"},
+		"backup": map[string]any{
+			"enabled":  true,
+			"classRef": map[string]any{"name": "c"},
+			"storages": []any{map[string]any{
+				"storageRef": map[string]any{"name": "s1"},
+				"pitr":       map[string]any{"enabled": true},
+			}},
+		},
+	}
+
+	srv := newUpdateServer(t,
+		func(w http.ResponseWriter, _ *http.Request) {
+			writeJSONBody(w, instanceJSON(t, "1", currentSpec))
+		},
+		nil, // must never reach the PUT
+	)
+	defer srv.Close()
+
+	valuesPath := filepath.Join(t.TempDir(), "values.yaml")
+	require.NoError(t, os.WriteFile(valuesPath,
+		[]byte("backup:\n  storages:\n    - storageRef:\n        name: s1\n      pitr:\n        enabled: null\n"), 0o600))
+
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, newTestConfig(srv.URL).Save(cfgPath))
+
+	opts := baseUpdateOpts()
+	opts.ValuesFile = valuesPath
+
+	iu := NewUpdater(Config{}, zap.NewNop().Sugar())
+	err := iu.Run(context.Background(), opts, cfgPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "backup.storages[0].pitr.enabled")
 }
 
 // A typo'd component name must be rejected, not PUT as a new component.
@@ -616,7 +646,7 @@ func TestUpdate_UnknownComponentRejected(t *testing.T) {
 
 	srv := newUpdateServerWithProvider(t,
 		func(w http.ResponseWriter, _ *http.Request) {
-			writeJSONBody(w, http.StatusOK, instanceJSON(t, "1", currentSpec))
+			writeJSONBody(w, instanceJSON(t, "1", currentSpec))
 		},
 		nil, // must never reach the PUT
 	)
@@ -628,7 +658,7 @@ func TestUpdate_UnknownComponentRejected(t *testing.T) {
 	opts := baseUpdateOpts()
 	opts.Set = []string{"components.engien.replicas=5"}
 
-	iu := NewInstanceUpdater(Config{}, zap.NewNop().Sugar())
+	iu := NewUpdater(Config{}, zap.NewNop().Sugar())
 	err := iu.Run(context.Background(), opts, cfgPath)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "engien")
@@ -644,7 +674,7 @@ func TestUpdate_DryRun_NoWrite(t *testing.T) {
 
 	srv := newUpdateServer(t,
 		func(w http.ResponseWriter, _ *http.Request) {
-			writeJSONBody(w, http.StatusOK, instanceJSON(t, "1", currentSpec))
+			writeJSONBody(w, instanceJSON(t, "1", currentSpec))
 		},
 		nil, // PUT must not be called
 	)
@@ -657,7 +687,7 @@ func TestUpdate_DryRun_NoWrite(t *testing.T) {
 	opts.Set = []string{"components.engine.replicas=5"}
 	opts.DryRun = true
 
-	iu := NewInstanceUpdater(Config{}, zap.NewNop().Sugar())
+	iu := NewUpdater(Config{}, zap.NewNop().Sugar())
 	err := iu.Run(context.Background(), opts, cfgPath)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 }

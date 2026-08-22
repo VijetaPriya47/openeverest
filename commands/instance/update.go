@@ -83,8 +83,8 @@ func init() {
 	_ = updateCmd.MarkFlagRequired(cli.FlagInstanceNamespace)
 }
 
-func updatePreRun(cmd *cobra.Command, _ []string) { //nolint:revive
-	updateCfg.Pretty = !(cmd.Flag(cli.FlagVerbose).Changed || cmd.Flag(cli.FlagJSON).Changed)
+func updatePreRun(cmd *cobra.Command, _ []string) {
+	updateCfg.Pretty = !cmd.Flag(cli.FlagVerbose).Changed && !cmd.Flag(cli.FlagJSON).Changed
 }
 
 func updateRun(cmd *cobra.Command, _ []string) {
@@ -94,7 +94,7 @@ func updateRun(cmd *cobra.Command, _ []string) {
 		os.Exit(1)
 	}
 
-	iu := instancecli.NewInstanceUpdater(*updateCfg, logger.GetLogger())
+	iu := instancecli.NewUpdater(*updateCfg, logger.GetLogger())
 	if err := iu.Run(cmd.Context(), *updateOpts, cfgPath); err != nil {
 		output.PrintError(err, logger.GetLogger(), updateCfg.Pretty)
 		os.Exit(1)

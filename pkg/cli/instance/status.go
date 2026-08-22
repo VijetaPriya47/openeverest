@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"text/tabwriter"
 	"time"
@@ -68,19 +67,13 @@ func (is *InstanceStatusRunner) Run(ctx context.Context, opts StatusOptions, cfg
 		return err
 	}
 
-	resp, err := c.GetInstanceWithResponse(ctx, opts.Cluster, opts.Namespace, opts.Name)
+	inst, err := getInstance(ctx, c, opts.Cluster, opts.Namespace, opts.Name)
 	if err != nil {
-		return fmt.Errorf("failed to fetch instance %q: %w", opts.Name, err)
-	}
-	if resp.StatusCode() == http.StatusNotFound {
-		return fmt.Errorf("instance %q not found in namespace %q", opts.Name, opts.Namespace)
-	}
-	if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
-		return fmt.Errorf("unexpected response fetching instance %q: %s", opts.Name, resp.Status())
+		return err
 	}
 
 	var buf bytes.Buffer
-	is.render(&buf, resp.JSON200, opts.Namespace)
+	is.render(&buf, inst, opts.Namespace)
 	fmt.Fprint(os.Stdout, buf.String())
 
 	if opts.Watch {
