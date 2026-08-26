@@ -17,9 +17,13 @@ package validation
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 
 	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	api "github.com/openeverest/openeverest/v2/internal/server/api"
+	"github.com/openeverest/openeverest/v2/pkg/events"
 )
 
 // ListInstances proxies the request to the next handler.
@@ -42,6 +46,37 @@ func (h *validateHandler) CreateInstance(ctx context.Context, cluster string, in
 func (h *validateHandler) UpdateInstance(ctx context.Context, cluster string, instance *corev1alpha1.Instance) (*corev1alpha1.Instance, error) {
 	// Add validation here if needed in the future
 	return h.next.UpdateInstance(ctx, cluster, instance)
+}
+
+// PatchInstance rejects a patch naming a member the caller may not write, then proxies to the next handler.
+// A merge patch can address any member of the stored object, not just the ones a client is meant to set.
+func (h *validateHandler) PatchInstance(ctx context.Context, cluster, namespace, name string, patch []byte) (*corev1alpha1.Instance, error) {
+	var doc map[string]any
+	// Without the nil check a "null" body reaches the API server as an empty patch.
+	if err := json.Unmarshal(patch, &doc); err != nil || doc == nil {
+		return nil, errors.Join(ErrInvalidRequest, errors.New("patch must be a JSON object"))
+	}
+	// The CRD's status subresource already blocks this, so it is belt-and-braces.
+	if _, found := doc["status"]; found {
+		return nil, errors.Join(ErrInvalidRequest, errors.New("status may not be patched"))
+	}
+	if metadata, isObject := doc["metadata"].(map[string]any); isObject {
+		for _, member := range []string{"ownerReferences", "finalizers", "name", "namespace"} {
+			if _, found := metadata[member]; found {
+				return nil, errors.Join(ErrInvalidRequest, fmt.Errorf("metadata.%s may not be patched", member))
+			}
+		}
+		// The typed verbs stamp these after decoding, so a caller cannot author
+		// them there. A merge patch is relayed as sent, so it could.
+		if annotations, isObject := metadata["annotations"].(map[string]any); isObject {
+			for _, key := range []string{events.AnnotationActorType, events.AnnotationActorID} {
+				if _, found := annotations[key]; found {
+					return nil, errors.Join(ErrInvalidRequest, fmt.Errorf("annotation %s may not be patched", key))
+				}
+			}
+		}
+	}
+	return h.next.PatchInstance(ctx, cluster, namespace, name, patch)
 }
 
 // DeleteInstance proxies the request to the next handler.
