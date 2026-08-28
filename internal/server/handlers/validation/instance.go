@@ -49,39 +49,51 @@ func (h *validateHandler) UpdateInstance(ctx context.Context, cluster string, in
 }
 
 // PatchInstance rejects a patch naming a member the caller may not write, then proxies to the next handler.
-// A merge patch can address any member of the stored object, not just the ones a client is meant to set.
 func (h *validateHandler) PatchInstance(ctx context.Context, cluster, namespace, name string, patch []byte) (*corev1alpha1.Instance, error) {
 	var doc map[string]any
-	// Without the nil check a "null" body reaches the API server as an empty patch.
+
 	if err := json.Unmarshal(patch, &doc); err != nil || doc == nil {
 		return nil, errors.Join(ErrInvalidRequest, errors.New("patch must be a JSON object"))
 	}
-	// The CRD's status subresource already blocks this, so it is belt-and-braces.
+
 	if _, found := doc["status"]; found {
 		return nil, errors.Join(ErrInvalidRequest, errors.New("status may not be patched"))
 	}
 	if metadata, isObject := doc["metadata"].(map[string]any); isObject {
-		for _, member := range []string{"ownerReferences", "finalizers", "name", "namespace"} {
-			if _, found := metadata[member]; found {
-				return nil, errors.Join(ErrInvalidRequest, fmt.Errorf("metadata.%s may not be patched", member))
-			}
-		}
-		if annotations, found := metadata["annotations"]; found {
-			if annotations == nil {
-				return nil, errors.Join(ErrInvalidRequest, errors.New("metadata.annotations may not be removed"))
-			}
-			// The typed verbs stamp these after decoding, so a caller cannot
-			// author them there. A merge patch is relayed as sent, so it could.
-			if named, isObject := annotations.(map[string]any); isObject {
-				for _, key := range []string{events.AnnotationActorType, events.AnnotationActorID} {
-					if _, found := named[key]; found {
-						return nil, errors.Join(ErrInvalidRequest, fmt.Errorf("annotation %s may not be patched", key))
-					}
-				}
-			}
+		if err := rejectProtectedMetadata(metadata); err != nil {
+			return nil, errors.Join(ErrInvalidRequest, err)
 		}
 	}
 	return h.next.PatchInstance(ctx, cluster, namespace, name, patch)
+}
+
+// rejectProtectedMetadata reports the metadata members a patch may not name.
+func rejectProtectedMetadata(metadata map[string]any) error {
+	for _, member := range []string{"ownerReferences", "finalizers", "name", "namespace"} {
+		if _, found := metadata[member]; found {
+			return fmt.Errorf("metadata.%s may not be patched", member)
+		}
+	}
+
+	annotations, found := metadata["annotations"]
+	if !found {
+		return nil
+	}
+	if annotations == nil {
+		return errors.New("metadata.annotations may not be removed")
+	}
+	named, isObject := annotations.(map[string]any)
+	if !isObject {
+		return nil
+	}
+	// The typed verbs stamp these after decoding, so a caller cannot author
+	// them there. A merge patch is relayed as sent, so it could.
+	for _, key := range []string{events.AnnotationActorType, events.AnnotationActorID} {
+		if _, found := named[key]; found {
+			return fmt.Errorf("annotation %s may not be patched", key)
+		}
+	}
+	return nil
 }
 
 // DeleteInstance proxies the request to the next handler.
