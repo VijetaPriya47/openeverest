@@ -57,7 +57,7 @@ func (h *k8sHandler) UpdateInstance(ctx context.Context, cluster string, instanc
 // PatchInstance applies a merge patch to an instance, leaving the read-modify-write to the API server.
 // Strict validation is not optional: without it a misspelt path is pruned and returns 200 having changed nothing.
 // The actor is stamped into the patch document, since the patch bytes are the request body and annotations set on the object below are never sent.
-func (h *k8sHandler) PatchInstance(ctx context.Context, cluster, namespace, name string, patch []byte) (*corev1alpha1.Instance, error) {
+func (h *k8sHandler) PatchInstance(ctx context.Context, _ string, namespace, name string, patch []byte) (*corev1alpha1.Instance, error) {
 	var stamp metav1.ObjectMeta
 	if stampActor(ctx, &stamp) {
 		stampDoc, err := json.Marshal(map[string]any{
