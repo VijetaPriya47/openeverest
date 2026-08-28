@@ -94,6 +94,15 @@ func TestValidate_PatchInstance(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			desc:    "annotations removed wholesale",
+			patch:   `{"metadata":{"annotations":null}}`,
+			wantErr: true,
+		},
+		{
+			desc:  "annotations may still be set",
+			patch: `{"metadata":{"annotations":{"team.example.com/owner":"platform"}}}`,
+		},
+		{
 			desc:    "not an object",
 			patch:   `[1,2,3]`,
 			wantErr: true,

@@ -31,8 +31,9 @@ import (
 	"github.com/openeverest/openeverest/v2/pkg/kubernetes"
 )
 
-// TestK8s_PatchInstance pins the merge semantics, so a changed patch type or a
-// dropped option fails here.
+// TestK8s_PatchInstance pins the merge semantics. The fake client does no
+// strict decoding, so fieldValidation is not observable here and is covered by
+// api-tests/tests/instance.spec.ts instead.
 func TestK8s_PatchInstance(t *testing.T) {
 	t.Parallel()
 

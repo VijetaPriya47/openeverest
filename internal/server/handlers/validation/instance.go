@@ -66,12 +66,17 @@ func (h *validateHandler) PatchInstance(ctx context.Context, cluster, namespace,
 				return nil, errors.Join(ErrInvalidRequest, fmt.Errorf("metadata.%s may not be patched", member))
 			}
 		}
-		// The typed verbs stamp these after decoding, so a caller cannot author
-		// them there. A merge patch is relayed as sent, so it could.
-		if annotations, isObject := metadata["annotations"].(map[string]any); isObject {
-			for _, key := range []string{events.AnnotationActorType, events.AnnotationActorID} {
-				if _, found := annotations[key]; found {
-					return nil, errors.Join(ErrInvalidRequest, fmt.Errorf("annotation %s may not be patched", key))
+		if annotations, found := metadata["annotations"]; found {
+			if annotations == nil {
+				return nil, errors.Join(ErrInvalidRequest, errors.New("metadata.annotations may not be removed"))
+			}
+			// The typed verbs stamp these after decoding, so a caller cannot
+			// author them there. A merge patch is relayed as sent, so it could.
+			if named, isObject := annotations.(map[string]any); isObject {
+				for _, key := range []string{events.AnnotationActorType, events.AnnotationActorID} {
+					if _, found := named[key]; found {
+						return nil, errors.Join(ErrInvalidRequest, fmt.Errorf("annotation %s may not be patched", key))
+					}
 				}
 			}
 		}
