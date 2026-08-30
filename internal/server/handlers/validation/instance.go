@@ -79,8 +79,10 @@ func rejectProtectedMetadata(metadata map[string]any) error {
 	if !found {
 		return nil
 	}
+	// Honouring a wipe and stamping the actor in one document is not expressible
+	// in a merge patch, so the caller is pointed at the per-key route instead.
 	if annotations == nil {
-		return errors.New("metadata.annotations may not be removed")
+		return errors.New("metadata.annotations may not be removed wholesale; set individual keys to null instead")
 	}
 	named, isObject := annotations.(map[string]any)
 	if !isObject {

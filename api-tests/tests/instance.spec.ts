@@ -24,7 +24,11 @@ const MERGE_PATCH = 'application/merge-patch+json';
 const instanceURL = `/v1/clusters/${CLUSTER_NAME}/namespaces/${EVEREST_CI_NAMESPACE}/instances/${INSTANCE_NAME}`;
 
 test.describe('Instance PATCH', () => {
-  test.describe.configure({timeout: TIMEOUTS.OneMinute});
+  // Serial, not parallel: the suite runs fullyParallel with 5 workers, so a
+  // parallel describe would run beforeAll once per worker and race five
+  // creates of the same instance. These tests also share one instance's
+  // replicas, so they have to run in order.
+  test.describe.configure({mode: 'serial', timeout: TIMEOUTS.OneMinute});
 
   test.beforeAll(async ({request}) => {
     const resolveResponse = await request.get(

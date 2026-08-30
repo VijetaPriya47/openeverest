@@ -103,6 +103,11 @@ func TestValidate_PatchInstance(t *testing.T) {
 			patch: `{"metadata":{"annotations":{"team.example.com/owner":"platform"}}}`,
 		},
 		{
+			// The route the wholesale-removal error points the caller at.
+			desc:  "a single annotation may be removed by key",
+			patch: `{"metadata":{"annotations":{"team.example.com/owner":null}}}`,
+		},
+		{
 			desc:    "not an object",
 			patch:   `[1,2,3]`,
 			wantErr: true,

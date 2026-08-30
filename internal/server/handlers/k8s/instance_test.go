@@ -40,7 +40,10 @@ func TestK8s_PatchInstance(t *testing.T) {
 	replicas := int32(1)
 	seed := func() *corev1alpha1.Instance {
 		return &corev1alpha1.Instance{
-			ObjectMeta: metav1.ObjectMeta{Name: "db1", Namespace: "ns1"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "db1", Namespace: "ns1",
+				Annotations: map[string]string{"team.example.com/owner": "platform"},
+			},
 			Spec: corev1alpha1.InstanceSpec{
 				Version: "8.0",
 				Components: map[string]corev1alpha1.ComponentSpec{
@@ -102,6 +105,20 @@ func TestK8s_PatchInstance(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.NotContains(t, result.Annotations, events.AnnotationActorType)
+	})
+
+	t.Run("a single annotation can be removed through the stamp merge", func(t *testing.T) {
+		t.Parallel()
+
+		userCtx := context.WithValue(context.Background(), common.UserCtxKey, &jwt.Token{ //nolint:staticcheck
+			Claims: jwt.MapClaims{"sub": "bob", "iss": "everest"},
+		})
+		result, err := newHandler().PatchInstance(userCtx, "prod", "ns1", "db1",
+			[]byte(`{"metadata":{"annotations":{"team.example.com/owner":null}}}`))
+		require.NoError(t, err)
+
+		assert.NotContains(t, result.Annotations, "team.example.com/owner")
+		assert.Equal(t, "bob", result.Annotations[events.AnnotationActorID])
 	})
 
 	t.Run("null removes a member", func(t *testing.T) {
