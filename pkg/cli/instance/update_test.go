@@ -209,6 +209,22 @@ func TestUpdate_UnknownComponentInValuesFileRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "engien")
 }
 
+// --set has no notion of list indices; reject it up front with a clear message
+// rather than sending a literal "storages[0]" key that reads as a schema typo.
+func TestUpdate_SetListIndexRejected(t *testing.T) {
+	t.Parallel()
+
+	srv := newUpdateServer(t, psmdbSpec(), nil)
+	defer srv.Close()
+
+	opts := baseUpdateOpts()
+	opts.Set = []string{"backup.storages[0].pitr.enabled=true"}
+
+	err := runUpdate(t, srv, opts)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not support list indices")
+}
+
 // The component check fails open on purpose: the server validates component names
 // too, so a provider lookup failure must not block an otherwise valid update.
 func TestUpdate_ProviderLookupFails_UpdateStillProceeds(t *testing.T) {

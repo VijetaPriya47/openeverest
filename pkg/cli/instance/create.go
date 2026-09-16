@@ -133,16 +133,17 @@ func (ic *InstanceCreator) Run(ctx context.Context, opts CreateOptions, cfgPath 
 		return err
 	}
 
-	if len(opts.Set) > 0 {
-		if err := validateComponents(opts.Set, prov, resolvedTopology); err != nil {
-			return err
-		}
-	}
-
 	// Merge order: preset < -f file < --set flags.
 	specOverrides, err := buildSpecOverrides(opts.ValuesFile, opts.Set)
 	if err != nil {
 		return err
+	}
+	// Checked before the preset merge, so this only validates names the user
+	// actually supplied via -f/--set, covering both instead of --set alone.
+	if names := patchedComponents(specOverrides); len(names) > 0 {
+		if err := validateComponentNames(names, prov, resolvedTopology); err != nil {
+			return err
+		}
 	}
 	if presetSpecBase != nil {
 		if specOverrides != nil {
@@ -383,23 +384,6 @@ func validateTopology(topology string, prov *client.Provider) error {
 	return nil
 }
 
-// validateComponents only checks --set paths starting with "components.".
-func validateComponents(setFlags []string, prov *client.Provider, topology string) error {
-	var names []string
-	for _, s := range setFlags {
-		parts := strings.SplitN(s, "=", 2)
-		if len(parts) < 2 {
-			continue
-		}
-		segments := strings.SplitN(parts[0], ".", 3)
-		if len(segments) < 2 || segments[0] != componentsKey {
-			continue
-		}
-		names = append(names, segments[1])
-	}
-	return validateComponentNames(names, prov, topology)
-}
-
 // validateComponentNames rejects component names the provider does not offer under
 // the given topology.
 func validateComponentNames(names []string, prov *client.Provider, topology string) error {
@@ -540,6 +524,9 @@ func parseSetFlags(setFlags []string) (map[string]any, error) {
 
 		if path == "" {
 			return nil, fmt.Errorf("invalid --set flag %q: path must not be empty", s)
+		}
+		if strings.ContainsRune(path, '[') {
+			return nil, fmt.Errorf("invalid --set flag %q: --set does not support list indices; set the whole list with -f", s)
 		}
 
 		segments := strings.Split(path, ".")
