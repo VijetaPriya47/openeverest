@@ -108,7 +108,7 @@ func TestRBAC_Restore(t *testing.T) {
 		},
 	}
 
-	ctx := context.WithValue(context.Background(), common.UserCtxKey, rbac.User{Subject: "bob"})
+	ctx := context.WithValue(context.Background(), common.UserCtxKey, rbac.User{Subject: "bob"}) //nolint:staticcheck
 
 	newHandler := func(t *testing.T, policy string, next *handlers.MockHandler) *rbacHandler {
 		t.Helper()

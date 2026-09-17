@@ -298,7 +298,7 @@ func TestRBAC_Backup(t *testing.T) {
 		// Admin policy: admin can never legitimately fail the enforce check
 		// below, so if the not-found collapse above were ever removed, this
 		// is the subject that would expose it by getting a different error.
-		ctx := context.WithValue(context.Background(), common.UserCtxKey, rbac.User{Subject: "bob"})
+		ctx := context.WithValue(context.Background(), common.UserCtxKey, rbac.User{Subject: "bob"}) //nolint:staticcheck
 		enf, err := rbac.NewEnforcer(ctx, newConfigMapMock(newPolicy("g, bob, role:admin")), zap.NewNop().Sugar())
 		require.NoError(t, err)
 		h := &rbacHandler{next: next, log: zap.NewNop().Sugar(), enforcer: enf, userGetter: testUserGetter}
