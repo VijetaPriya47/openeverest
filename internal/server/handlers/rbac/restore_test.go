@@ -168,6 +168,25 @@ func TestRBAC_Restore(t *testing.T) {
 		}
 	})
 
+	t.Run("CreateRestore with no instanceRef fails closed under a namespace wildcard", func(t *testing.T) {
+		t.Parallel()
+
+		// InstanceRef is a value, not a pointer: an omitted instanceRef in the
+		// request body decodes to an empty name, which would otherwise build
+		// "prod/ns1/" and match a namespace-wide wildcard grant despite naming
+		// no real instance. Regression test for the behavior of namespace-wide wildcard grants.
+		restore := restoreFixture()
+		restore.Spec.InstanceRef.Name = ""
+
+		h := newHandler(t, newPolicy(
+			"p, role:test, restores, *, prod/ns1/*",
+			"g, bob, role:test",
+		), mockRestores())
+
+		_, err := h.CreateRestore(ctx, "prod", restore)
+		require.ErrorIs(t, err, ErrInsufficientPermissions)
+	})
+
 	t.Run("missing restore collapses to the same error as denied", func(t *testing.T) {
 		t.Parallel()
 

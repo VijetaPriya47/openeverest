@@ -43,8 +43,14 @@ func (h *rbacHandler) GetRestore(ctx context.Context, cluster, namespace, name s
 	return restore, nil
 }
 
-// CreateRestore creates a new restore, gated by RBAC on the instance it targets.
+// CreateRestore creates a new restore, gated by RBAC on the instance it targets. 
+// InstanceRef is a value, not a pointer, so a request body with no instanceRef decodes to an empty name.
+// Fail closed on that rather than build an object like "cluster/ns/" that a namespace-wide wildcard grant
+// would match despite naming no real instance.
 func (h *rbacHandler) CreateRestore(ctx context.Context, cluster string, restore *backupv1alpha1.Restore) (*backupv1alpha1.Restore, error) {
+	if restore.Spec.InstanceRef.Name == "" {
+		return nil, ErrInsufficientPermissions
+	}
 	object := rbac.ClusterNamespacedObjectName(cluster, restore.GetNamespace(), restore.Spec.InstanceRef.Name)
 	if err := h.enforce(ctx, rbac.ResourceRestores, rbac.ActionCreate, object); err != nil {
 		return nil, err
