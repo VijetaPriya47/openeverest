@@ -876,12 +876,24 @@ func TestRBAC_Instance(t *testing.T) {
 				),
 			},
 			{
-				desc:    "has read permission",
+				desc:    "has read-connection permission",
+				cluster: "prod",
+				policy: newPolicy(
+					"p, role:test, instances, read-connection, prod/ns1/db1",
+					"g, bob, role:test",
+				),
+			},
+			{
+				// Regression test: plain read must not imply read-connection -
+				// globMatch("read", "read-connection") is false, so a standard
+				// read-only grant must not also hand out credentials.
+				desc:    "read permission alone is not enough",
 				cluster: "prod",
 				policy: newPolicy(
 					"p, role:test, instances, read, prod/ns1/db1",
 					"g, bob, role:test",
 				),
+				wantErr: ErrInsufficientPermissions,
 			},
 			{
 				desc:    "no permissions",
