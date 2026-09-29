@@ -22,7 +22,7 @@ import (
 	"github.com/openeverest/openeverest/v2/pkg/rbac"
 )
 
-// ListInstanceRestores returns the restores belonging to an instance, gated by RBAC on that instance. 
+// ListInstanceRestores returns the restores belonging to an instance, gated by RBAC on that instance.
 // Every item in the list belongs to the same instance, so one check against it is sufficient.
 func (h *rbacHandler) ListInstanceRestores(ctx context.Context, cluster, namespace, instanceName string) (*backupv1alpha1.RestoreList, error) {
 	object := rbac.ClusterNamespacedObjectName(cluster, namespace, instanceName)
