@@ -178,10 +178,11 @@ func TestRBAC_Restore(t *testing.T) {
 		restore := restoreFixture()
 		restore.Spec.InstanceRef.Name = ""
 
-		h := newHandler(t, newPolicy(
+		policy := newPolicy(
 			"p, role:test, restores, *, prod/ns1/*",
 			"g, bob, role:test",
-		), mockRestores())
+		)
+		h := newHandler(t, policy, mockRestores())
 
 		_, err := h.CreateRestore(ctx, "prod", restore)
 		require.ErrorIs(t, err, ErrInsufficientPermissions)
