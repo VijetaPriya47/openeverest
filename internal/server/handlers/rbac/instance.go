@@ -140,10 +140,7 @@ func (h *rbacHandler) DeleteInstance(ctx context.Context, cluster, namespace, na
 	return h.next.DeleteInstance(ctx, cluster, namespace, name, params)
 }
 
-// GetInstanceConnection returns connection details, gated by RBAC. Credentials
-// require the dedicated read-connection action rather than plain read, so a
-// standard read-only grant (`*, read, ...`) does not also expose them - only
-// an explicit read-connection grant or a wildcard action does.
+// GetInstanceConnection returns connection details, gated by the read-connection action.
 func (h *rbacHandler) GetInstanceConnection(ctx context.Context, cluster, namespace, name string) (*api.InstanceConnectionDetails, error) {
 	object := rbac.ClusterNamespacedObjectName(cluster, namespace, name)
 	if err := h.enforce(ctx, rbac.ResourceInstances, rbac.ActionReadConnection, object); err != nil {

@@ -884,9 +884,6 @@ func TestRBAC_Instance(t *testing.T) {
 				),
 			},
 			{
-				// Regression test: plain read must not imply read-connection -
-				// globMatch("read", "read-connection") is false, so a standard
-				// read-only grant must not also hand out credentials.
 				desc:    "read permission alone is not enough",
 				cluster: "prod",
 				policy: newPolicy(

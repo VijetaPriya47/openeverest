@@ -152,10 +152,8 @@ const (
 	// from preset specifications. Users without this permission can only create
 	// instances that exactly match their referenced presets.
 	ActionDeploy = "deploy"
-	// ActionReadConnection gates reading live connection credentials. Kept
-	// distinct from ActionRead (globMatch does not imply it) so a standard
-	// read-only grant does not also hand out database passwords; only a
-	// wildcard action grant does.
+	// ActionReadConnection gates reading an instance's connection credentials.
+	// ActionRead does not imply it; only an explicit grant or ActionAll does.
 	ActionReadConnection = "read-connection"
 	ActionAll            = "*"
 )
