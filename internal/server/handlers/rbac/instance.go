@@ -226,7 +226,7 @@ func (h *rbacHandler) ensureInstanceMatchesPreset(ctx context.Context, cluster s
 	return nil
 }
 
-// ensureInstanceReferencesAuthorized checks the caller may use every resource the instance points at. 
+// ensureInstanceReferencesAuthorized checks the caller may use every resource the instance points at.
 // On update, current is the stored instance and only references the request adds or changes are checked,
 // so losing a grant on an untouched reference doesn't lock the caller out of editing unrelated fields.
 func (h *rbacHandler) ensureInstanceReferencesAuthorized(ctx context.Context, cluster string, current, instance *corev1alpha1.Instance) error {
