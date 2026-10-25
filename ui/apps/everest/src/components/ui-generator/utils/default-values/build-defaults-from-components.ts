@@ -15,10 +15,12 @@
 import {
   Component,
   ComponentGroup,
+  isWidgetComponent,
 } from 'components/ui-generator/ui-generator.types';
 import { generateFieldId } from '../component-renderer/generate-field-id';
 import { UI_TYPE_DEFAULT_VALUE } from 'components/ui-generator/constants';
 import { getToggleableMeta } from '../toggleable/toggleable';
+import { getSchemaDefault } from './get-schema-default';
 
 export const buildDefaultsFromComponents = (
   components: { [key: string]: Component | ComponentGroup },
@@ -54,11 +56,11 @@ export const buildDefaultsFromComponents = (
       Object.assign(result, nestedDefaults);
     } else {
       const component = item as Component;
-      if (
-        'fieldParams' in component &&
-        component.fieldParams?.defaultValue !== undefined
-      ) {
-        result[fieldId] = component.fieldParams.defaultValue;
+      const schemaDefault = getSchemaDefault(component);
+      if (schemaDefault !== undefined) {
+        result[fieldId] = schemaDefault;
+      } else if (isWidgetComponent(component)) {
+        // Widget components manage their own default value.
       } else if (!buildOnlySchemaDefaults) {
         result[fieldId] = UI_TYPE_DEFAULT_VALUE[component.uiType];
       }

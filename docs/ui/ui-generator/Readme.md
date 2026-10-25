@@ -11,12 +11,14 @@
   - [Component vs ComponentGroup](#component-vs-componentgroup)
     - [Component (Single Field)](#component-single-field)
     - [ComponentGroup (Nested Fields)](#componentgroup-nested-fields)
+    - [Widget (Host-Rendered Component)](#widget-host-rendered-component)
 - [Mode-Aware Overrides](#mode-aware-overrides)
   - [Component-level modes](#component-level-modes)
   - [FieldParams-level modes](#fieldparams-level-modes)
   - [Validation-level modes](#validation-level-modes)
 - Field Types
   - [Number Field](components/number-field.md)
+  - [Secret Field](components/secret-field.md)
   - [Select Field](components/select-field.md)
   - [Text Field](components/text-field.md)
   - [Toggle Field](components/toggle-field.md)
@@ -25,6 +27,8 @@
   - [Accordion Group](groups.md#accordion-group)
   - [Bordered Group](groups.md#bordered-group)
   - [Toggleable Group](groups.md#toggleable-group)
+- [Widgets](widgets.md)
+  - [Pod Scheduling Policy](widgets.md#pod-scheduling-policy)
 - [Validation](validation.md)
   - [Default Validation](validation.md#default-validation)
   - [Schema Custom Validation](validation.md#schema-custom-validation)
@@ -132,8 +136,8 @@ basicInfo:
 
 A **Component** represents a single form field with the following properties:
 
-- **`uiType`**: Type of UI control (`'number'`, `'select'`, `'hidden'`)
-- **`path`** OR **`id`**: The data path in the resulting form values (e.g., `"spec.replica.nodes"`)
+- **`uiType`**: Type of UI control (`'number'`, `'select'`, `'hidden'`), or `'widget'` for a host-rendered component (see [Widget](#widget-host-rendered-component))
+- **`path`** OR **`id`**: The data path in the resulting form values (e.g., `"spec.replica.nodes"`). For widgets, defined by each widget type.
 - **`fieldParams`**: Configuration for the field (label, placeholder, defaultValue, etc.). Supports `modes` for documented per-mode overrides of shared field params
 - **`modes`** (optional): Per-mode component-level overrides (e.g. `uiType: hidden`)
 - **`validation`** (optional): Validation rules (min, max, etc.). Supports `modes` for per-mode overrides
@@ -196,6 +200,11 @@ resources:
     - memory
 ```
 
+#### Widget (Host-Rendered Component)
+
+A **Widget** is a component the application renders itself (`uiType: widget` + `widgetType`),
+for UI that plain fields can't describe. See [Widgets](widgets.md) for the supported widget types.
+
 ## Mode-Aware Overrides
 
 ### FieldParams-level modes
@@ -233,7 +242,8 @@ Validation-specific mode-aware behavior is documented in [validation.md](validat
 
 ### Path vs ID
 
-Each component must have either a `path` or an `id` property (but not both):
+Each field component must have either a `path` or an `id` property (but not both).
+For [widgets](widgets.md), where the data lives is defined by each widget type.
 
 - **`path`**: Dot-notation string representing where the value should be stored in the form data
   - Example: `"spec.replica.nodes"` → `{ spec: { replica: { nodes: value } } }`
@@ -243,12 +253,17 @@ Each component must have either a `path` or an `id` property (but not both):
 
 ### Path scoping
 
-A component's `path` is its form-field name and write target verbatim. Declare it
-**relative to the section's root** — the object the consumer merges the section into
-(e.g. a single storage's `pitr`) — and spell the real sub-structure, so the schema alone
-says where the value lands. The consumer only supplies the root; it never injects keys.
+A component's `path` is its write target, **relative to the section's root** — the object the
+schema describes. Spell the real sub-structure below that root, so the schema alone says where the
+value lands. The host supplies the root (the form field is `<root>.<path>`) and never injects keys
+between the root and the path.
 
-- ✅ `path: parameters.timeBetweenUploads` → `<root>.parameters.timeBetweenUploads`
+| Schema              | Root                 | Example `path`                    |
+| ------------------- | -------------------- | --------------------------------- |
+| Topology            | the Instance         | `spec.components.engine.replicas` |
+| Backup class `pitr` | one storage's `pitr` | `parameters.timeBetweenUploads`   |
+| Secret definition   | the secret's data    | `MONGODB_USER`                    |
+
 - ❌ `path: spec.backup.storages[].pitr.parameters.timeBetweenUploads`
 
 No absolute paths and no array segments (`[]`): an empty `[]` has no index to bind to, and

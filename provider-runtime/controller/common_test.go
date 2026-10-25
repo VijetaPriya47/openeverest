@@ -38,6 +38,26 @@ func TestStatus_ToV2Alpha1(t *testing.T) {
 	assert.Equal(t, "waiting for cluster...", status.Message)
 }
 
+func TestContext_PodLabels(t *testing.T) {
+	t.Parallel()
+
+	in := &v1alpha1.Instance{ObjectMeta: metav1.ObjectMeta{Name: "db", Namespace: "ns"}}
+	c := NewContext(t.Context(), nil, in, "psmdb")
+
+	assert.Empty(t, c.LabelledComponents())
+
+	want := map[string]string{
+		ProviderLabel:  "psmdb",
+		InstanceLabel:  "db",
+		ComponentLabel: "proxy",
+	}
+	assert.Equal(t, want, c.PodLabels("proxy"))
+	c.PodLabels("engine")
+	c.PodLabels("proxy")
+
+	assert.Equal(t, []string{"engine", "proxy"}, c.LabelledComponents())
+}
+
 func TestReconcileExternalBackupStatus(t *testing.T) {
 	t.Parallel()
 
@@ -55,6 +75,11 @@ func TestReconcileExternalBackupStatus(t *testing.T) {
 				Path:        "backups/a",
 				StartedAt:   now,
 				CompletedAt: metav1.NewTime(time.Now().Add(time.Minute)),
+				SourceMetadata: &backupv1alpha1.BackupSourceMetadata{
+					EngineVersion: "8.0.12-4",
+					BackupType:    "logical",
+					Topology:      "replicaSet",
+				},
 			},
 			expectedState: backupv1alpha1.BackupStateSucceeded,
 		},
@@ -105,6 +130,7 @@ func TestReconcileExternalBackupStatus(t *testing.T) {
 				require.NotNil(t, backup.Status.CompletedAt)
 				assert.Equal(t, tc.external.StartedAt, *backup.Status.StartedAt)
 				assert.Equal(t, tc.external.CompletedAt, *backup.Status.CompletedAt)
+				assert.Equal(t, tc.external.SourceMetadata, backup.Status.SourceMetadata)
 			}
 		})
 	}
