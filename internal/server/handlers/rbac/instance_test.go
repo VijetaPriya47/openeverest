@@ -1044,6 +1044,12 @@ func TestRBAC_InstanceReferences(t *testing.T) {
 		{desc: "changing a schedule with backups create", mutate: func(i *corev1alpha1.Instance) {
 			i.Spec.Backup.Storages[0].Schedules[0].Cron = "0 * * * *"
 		}, policy: []string{createBackups}},
+		{desc: "enabling backups with existing schedules requires backups create", mutate: func(i *corev1alpha1.Instance) {
+			i.Spec.Backup.Enabled = true
+		}, wantDeny: true},
+		{desc: "enabling backups with existing schedules and backups create", mutate: func(i *corev1alpha1.Instance) {
+			i.Spec.Backup.Enabled = true
+		}, policy: []string{createBackups}},
 		{desc: "removing schedules needs no backups create", mutate: func(i *corev1alpha1.Instance) {
 			i.Spec.Backup.Storages[0].Schedules = nil
 		}},
@@ -1078,7 +1084,14 @@ func TestRBAC_InstanceReferences(t *testing.T) {
 			patch:   `{"spec":{"dataSource":{"type":"Backup","backup":{"backupRef":{"name":"backup-1"}}}}}`,
 			wantErr: ErrInsufficientPermissions,
 		},
+		{
+			desc:    "patch enabling backups with existing schedules",
+			patch:   `{"spec":{"backup":{"enabled":true}}}`,
+			wantErr: ErrInsufficientPermissions,
+		},
 		{desc: "malformed patch", patch: `{"spec":`, wantErr: valhandler.ErrInvalidRequest},
+		{desc: "null patch", patch: `null`, wantErr: valhandler.ErrInvalidRequest},
+		{desc: "non-object patch", patch: `[]`, wantErr: valhandler.ErrInvalidRequest},
 	}
 	for _, tc := range patchCases {
 		t.Run("PatchInstance/"+tc.desc, func(t *testing.T) {

@@ -175,6 +175,13 @@ func (h *rbacHandler) PatchInstance(ctx context.Context, cluster, namespace, nam
 
 // mergePatchInstance returns the instance a JSON merge patch would produce.
 func mergePatchInstance(current *corev1alpha1.Instance, patch []byte) (*corev1alpha1.Instance, error) {
+	// RBAC runs before validation, so reject what validateMergePatch would:
+	// MergePatch returns a non-object patch unchanged, and a null one decodes
+	// to an empty Instance that passes every check.
+	var doc map[string]any
+	if err := json.Unmarshal(patch, &doc); err != nil || doc == nil {
+		return nil, errors.Join(valhandler.ErrInvalidRequest, errors.New("patch must be a JSON object"))
+	}
 	original, err := json.Marshal(current)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal instance: %w", err)
@@ -249,7 +256,7 @@ func (h *rbacHandler) ensureInstanceReferencesAuthorized(ctx context.Context, cl
 		if err := h.enforce(ctx, rbac.ResourceRestores, rbac.ActionCreate, object); err != nil {
 			return err
 		}
-		if err := h.ensureDataSourceReadable(ctx, cluster, instance.GetNamespace(), *dataSource); err != nil {
+		if err := h.ensureDataSourceReadable(ctx, cluster, instance.GetNamespace(), instance.GetName(), *dataSource); err != nil {
 			return err
 		}
 	}
@@ -306,10 +313,8 @@ func (h *rbacHandler) ensureInstanceBackupAuthorized(
 				return err
 			}
 		}
-		schedulesSet := len(storage.Schedules) > 0 || storage.PITR != nil
-		schedulesUnchanged := reflect.DeepEqual(storage.Schedules, currentStorage.Schedules) &&
-			reflect.DeepEqual(storage.PITR, currentStorage.PITR)
-		if schedulesSet && !schedulesUnchanged {
+		// Enabling backups turns on schedules that are already defined.
+		if startsBackups(storage, currentStorage, backup.Enabled && !current.Enabled) {
 			schedulesChanged = true
 		}
 	}
@@ -318,4 +323,15 @@ func (h *rbacHandler) ensureInstanceBackupAuthorized(
 	}
 	object := rbac.ClusterNamespacedObjectName(cluster, instance.GetNamespace(), instance.GetName())
 	return h.enforce(ctx, rbac.ResourceBackups, rbac.ActionCreate, object)
+}
+
+// startsBackups reports whether storage adds, changes or switches on a
+// schedule or PITR, compared with what current had for the same storage.
+func startsBackups(storage, current corev1alpha1.InstanceBackupStorage, enabling bool) bool {
+	if len(storage.Schedules) == 0 && storage.PITR == nil {
+		return false
+	}
+	return enabling ||
+		!reflect.DeepEqual(storage.Schedules, current.Schedules) ||
+		!reflect.DeepEqual(storage.PITR, current.PITR)
 }

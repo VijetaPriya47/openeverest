@@ -212,8 +212,14 @@ func TestRBAC_Restore(t *testing.T) {
 			}
 			return restore
 		}
+		inPlacePITR := func() *backupv1alpha1.Restore {
+			restore := fromPITR()
+			restore.Spec.DataSource.PointInTime.Source.InstanceRef = nil
+			return restore
+		}
 		const (
 			createRestore = "p, role:test, restores, create, prod/ns1/instance-1"
+			readTarget    = "p, role:test, backups, read, prod/ns1/instance-1"
 			readSource    = "p, role:test, backups, read, prod/ns1/source-db"
 			readStorage   = "p, role:test, backup-storages, read, prod/ns1/s3"
 		)
@@ -228,6 +234,9 @@ func TestRBAC_Restore(t *testing.T) {
 			{desc: "backup not readable", restore: fromBackup(), policy: []string{createRestore}, wantDeny: true},
 			{desc: "pitr source readable", restore: fromPITR(), policy: []string{createRestore, readSource, readStorage}},
 			{desc: "pitr storage not readable", restore: fromPITR(), policy: []string{createRestore, readSource}, wantDeny: true},
+			// An omitted source instanceRef recovers the target's own stream.
+			{desc: "in-place pitr readable via the target", restore: inPlacePITR(), policy: []string{createRestore, readTarget, readStorage}},
+			{desc: "in-place pitr without read on the target", restore: inPlacePITR(), policy: []string{createRestore, readSource, readStorage}, wantDeny: true},
 			{desc: "pitr source backups not readable", restore: fromPITR(), policy: []string{createRestore, readStorage}, wantDeny: true},
 		} {
 			t.Run(tc.desc, func(t *testing.T) {
