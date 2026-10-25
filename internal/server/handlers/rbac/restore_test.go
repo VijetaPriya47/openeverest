@@ -242,13 +242,16 @@ func TestRBAC_Restore(t *testing.T) {
 			t.Run(tc.desc, func(t *testing.T) {
 				t.Parallel()
 				next := mockRestores()
-				next.On("GetBackup", mock.Anything, mock.Anything, mock.Anything, "backup-1").Return(&backupv1alpha1.Backup{
-					ObjectMeta: metav1.ObjectMeta{Name: "backup-1", Namespace: "ns1"},
-					Spec: backupv1alpha1.BackupSpec{Origin: backupv1alpha1.BackupOrigin{
-						Type:        backupv1alpha1.BackupOriginTypeInstance,
-						InstanceRef: &objectref.ObjectRef{Name: "source-db"},
-					}},
-				}, nil)
+				next.On("GetBackup", mock.Anything, mock.Anything, mock.Anything, "backup-1").Return(
+					&backupv1alpha1.Backup{
+						ObjectMeta: metav1.ObjectMeta{Name: "backup-1", Namespace: "ns1"},
+						Spec: backupv1alpha1.BackupSpec{Origin: backupv1alpha1.BackupOrigin{
+							Type:        backupv1alpha1.BackupOriginTypeInstance,
+							InstanceRef: &objectref.ObjectRef{Name: "source-db"},
+						}},
+					},
+					nil,
+				)
 				h := newHandler(t, newPolicy(append(tc.policy, "g, bob, role:test")...), next)
 
 				_, err := h.CreateRestore(ctx, "prod", tc.restore)

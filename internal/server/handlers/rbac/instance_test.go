@@ -972,13 +972,16 @@ func TestRBAC_InstanceReferences(t *testing.T) {
 		next.On("CreateInstance", mock.Anything, mock.Anything, mock.Anything).Return(stored(), nil)
 		next.On("UpdateInstance", mock.Anything, mock.Anything, mock.Anything).Return(stored(), nil)
 		next.On("PatchInstance", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(stored(), nil)
-		next.On("GetBackup", mock.Anything, mock.Anything, mock.Anything, "backup-1").Return(&backupv1alpha1.Backup{
-			ObjectMeta: metav1.ObjectMeta{Name: "backup-1", Namespace: "ns1"},
-			Spec: backupv1alpha1.BackupSpec{Origin: backupv1alpha1.BackupOrigin{
-				Type:        backupv1alpha1.BackupOriginTypeInstance,
-				InstanceRef: &apicommon.ObjectRef{Name: "source-db"},
-			}},
-		}, nil)
+		next.On("GetBackup", mock.Anything, mock.Anything, mock.Anything, "backup-1").Return(
+			&backupv1alpha1.Backup{
+				ObjectMeta: metav1.ObjectMeta{Name: "backup-1", Namespace: "ns1"},
+				Spec: backupv1alpha1.BackupSpec{Origin: backupv1alpha1.BackupOrigin{
+					Type:        backupv1alpha1.BackupOriginTypeInstance,
+					InstanceRef: &apicommon.ObjectRef{Name: "source-db"},
+				}},
+			},
+			nil,
+		)
 		return &rbacHandler{next: next, log: zap.NewNop().Sugar(), enforcer: enf, userGetter: testUserGetter}
 	}
 
@@ -1166,11 +1169,15 @@ func TestRBAC_InstanceReferences(t *testing.T) {
 			t.Run(tc.desc, func(t *testing.T) {
 				t.Parallel()
 				ctx := testUserContext(rbac.User{Subject: "alice"})
-				policy := newPolicy(append([]string{
-					"p, role:deployer, instances, deploy, prod/ns1/*",
-					"p, role:deployer, instance-presets, read, prod/*",
-					"g, alice, role:deployer",
-				}, tc.policy...)...)
+				rules := append(
+					[]string{
+						"p, role:deployer, instances, deploy, prod/ns1/*",
+						"p, role:deployer, instance-presets, read, prod/*",
+						"g, alice, role:deployer",
+					},
+					tc.policy...,
+				)
+				policy := newPolicy(rules...)
 				enf, err := rbac.NewEnforcer(ctx, newConfigMapMock(policy), zap.NewNop().Sugar())
 				require.NoError(t, err)
 
